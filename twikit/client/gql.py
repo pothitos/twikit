@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 from ..constants import (
     DOMAIN,
@@ -125,8 +126,12 @@ class GQLClient:
         if extra_params is not None:
             params |= extra_params
         if headers is None:
-            headers = self.base._base_headers
-        return await self.base.get(url, params=flatten_params(params), headers=headers, **kwargs)
+            request_headers = self.base._base_headers
+        else:
+            request_headers = {**self.base._base_headers, **headers}
+        return await self.base.get(
+            url, params=flatten_params(params), headers=request_headers, **kwargs
+        )
 
     async def gql_post(
         self,
@@ -143,8 +148,10 @@ class GQLClient:
         if extra_data is not None:
             data |= extra_data
         if headers is None:
-            headers = self.base._base_headers
-        return await self.base.post(url, json=data, headers=headers, **kwargs)
+            request_headers = self.base._base_headers
+        else:
+            request_headers = {**self.base._base_headers, **headers}
+        return await self.base.post(url, json=data, headers=request_headers, **kwargs)
 
     async def search_timeline(
         self,
@@ -162,8 +169,12 @@ class GQLClient:
         }
         if cursor is not None:
             variables['cursor'] = cursor
+        referer = f'https://{DOMAIN}/search?q={quote(query)}&src=typed_query'
         return await self.gql_get(
-            Endpoint.SEARCH_TIMELINE, variables, SEARCH_TIMELINE_FEATURES
+            Endpoint.SEARCH_TIMELINE,
+            variables,
+            SEARCH_TIMELINE_FEATURES,
+            headers={'Referer': referer},
         )
 
     async def similar_posts(self, tweet_id: str):
