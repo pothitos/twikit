@@ -2625,24 +2625,48 @@ class Client:
         timeline_id = TIMELINE_IDS.get(category)
         if timeline_id is None:
             return []
-        
-        response, _ = await self.gql.generic_timeline_by_id(timeline_id, count)
-        entry_id_prefix = "trend"
+
+        response, _ = await self.gql.generic_timeline_by_id(
+            timeline_id, count, additional_request_params
+        )
+
+        raw_entries: list = []
+        instructions = find_dict(response, 'instructions', find_one=True)
+        if instructions:
+            for block in instructions[0]:
+                if (
+                    isinstance(block, dict)
+                    and block.get('type') == 'TimelineAddEntries'
+                    and block.get('entries')
+                ):
+                    raw_entries = block['entries']
+                    break
+        if not raw_entries:
+            entries_fallback = find_dict(response, 'entries', find_one=True)
+            if entries_fallback:
+                raw_entries = entries_fallback[0]
+
+        entry_id_prefix = 'trend'
         entries = [
-            i for i in find_dict(response, 'entries', find_one=True)[0]
-            if i['entryId'].startswith(entry_id_prefix)
+            i for i in raw_entries
+            if str(i.get('entryId', '')).startswith(entry_id_prefix)
         ]
         if not entries:
-          if not retry:
-              return []
-          # Recall the method again, as the trend information
-          # may not be returned due to a Twitter error.
-          return await self.get_trends(category, count, retry, additional_request_params)
-        
+            if not retry:
+                return []
+            return await self.get_trends(
+                category, count, retry, additional_request_params
+            )
+
         results = []
         for entry in entries:
-            item_content = entry['content'].get('itemContent', {})
+            item_content = entry.get('content', {}).get('itemContent') or {}
             trend_info = item_content.get('trend')
+            if not trend_info and (
+                item_content.get('__typename') == 'TimelineTrend'
+                or item_content.get('itemType') == 'TimelineTrend'
+            ):
+                trend_info = item_content
             if not trend_info:
                 continue
             results.append(Trend(self, trend_info))

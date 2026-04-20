@@ -72,7 +72,7 @@ class Endpoint:
     CREATE_BOOKMARK_FOLDER = url('6Xxqpq8TM_CREYiuof_h5w/createBookmarkFolder')
     FOLLOWERS = url('gC_lyAxZOptAMLCJX5UhWw/Followers')
     EXPLORE_PAGE = url('Lr7rbLxwMLDrWFJrlCdRVw/ExplorePage')
-    GENERIC_TIMELINE_BY_ID = url('J5pGd3g_8gGG28OGzHci8g/GenericTimelineById')
+    GENERIC_TIMELINE_BY_ID = url('23uIIth19xjoWPrqcRtlig/GenericTimelineById')
     BLUE_VERIFIED_FOLLOWERS = url('VmIlPJNEDVQ29HfzIhV4mw/BlueVerifiedFollowers')
     FOLLOWERS_YOU_KNOW = url('f2tbuGNjfOE8mNUO5itMew/FollowersYouKnow')
     FOLLOWING = url('2vUj-_Ek-UmBVDNtd8OnQA/Following')
@@ -313,12 +313,22 @@ class GQLClient:
         variables = {'cursor': ''}        
         return await self.gql_get(Endpoint.EXPLORE_PAGE, variables, EXPLORE_PAGE_FEATURES)
     
-    async def generic_timeline_by_id(self, timeline_id, count):
-        variables = {
+    async def generic_timeline_by_id(
+        self,
+        timeline_id: str,
+        count: int,
+        extra_variables: dict | None = None
+    ):
+        variables: dict = {
             'timelineId': timeline_id,
-            'count': count
+            'count': count,
+            'withQuickPromoteEligibilityTweetFields': True,
         }
-        return await self.gql_get(Endpoint.GENERIC_TIMELINE_BY_ID, variables, GENERIC_TIMELINE_FEATURES)
+        if extra_variables:
+            variables.update(extra_variables)
+        return await self.gql_get(
+            Endpoint.GENERIC_TIMELINE_BY_ID, variables, GENERIC_TIMELINE_FEATURES
+        )
 
     async def bird_watch_one_note(self, note_id):
         variables = {'note_id': note_id}
