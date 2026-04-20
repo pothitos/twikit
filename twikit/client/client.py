@@ -734,22 +734,45 @@ class Client:
         product = product.capitalize()
 
         response, _ = await self.gql.search_timeline(query, product, count, cursor)
-        instructions = find_dict(response, 'instructions', find_one=True)
-        if not instructions:
-            return Result([])
-        instructions = instructions[0]
+
+        blocks: list | None = None
+        try:
+            blocks = response['data']['search_by_raw_query']['search_timeline'][
+                'timeline']['instructions']
+        except (KeyError, TypeError, AttributeError):
+            pass
+        if not blocks:
+            instr_wrap = find_dict(response, 'instructions', find_one=True)
+            if instr_wrap:
+                blocks = instr_wrap[0]
+        if not isinstance(blocks, list):
+            blocks = []
+
+        def _search_timeline_entries(instrs: list) -> list:
+            merged: list = []
+            for b in instrs:
+                if (
+                    isinstance(b, dict)
+                    and b.get('type') == 'TimelineAddEntries'
+                    and b.get('entries')
+                ):
+                    merged.extend(b['entries'])
+            if merged:
+                return merged
+            for b in instrs:
+                if isinstance(b, dict) and b.get('entries'):
+                    return list(b['entries'])
+            return []
 
         if product == 'Media' and cursor is not None:
-            items = find_dict(instructions, 'moduleItems', find_one=True)[0]
+            items = find_dict(blocks, 'moduleItems', find_one=True)
+            items = items[0] if items else []
         else:
-            items_ = find_dict(instructions, 'entries', find_one=True)
-            if items_:
-                items = items_[0]
-            else:
-                items = []
-            if product == 'Media':
-                if 'items' in items[0]['content']:
-                    items = items[0]['content']['items']
+            items = _search_timeline_entries(blocks)
+            if product == 'Media' and items:
+                content0 = items[0].get('content') or {}
+                if 'items' in content0:
+                    items = content0['items']
                 else:
                     items = []
 
@@ -758,29 +781,57 @@ class Client:
 
         results = []
         for item in items:
-            if item['entryId'].startswith('cursor-bottom'):
-                next_cursor = item['content']['value']
-            if item['entryId'].startswith('cursor-top'):
-                previous_cursor = item['content']['value']
-            if not item['entryId'].startswith(('tweet', 'search-grid')):
+            entry_id = item.get('entryId', '')
+            content = item.get('content') or {}
+            if entry_id.startswith('cursor-bottom'):
+                val = content.get('value')
+                if val is not None:
+                    next_cursor = val
+            if entry_id.startswith('cursor-top'):
+                val = content.get('value')
+                if val is not None:
+                    previous_cursor = val
+            if not entry_id.startswith(('tweet', 'search-grid')):
                 continue
 
             try:
                 tweet = tweet_from_data(self, item)
             except KeyError:
                 tweet = None
-                
+
             if tweet is not None:
                 results.append(tweet)
 
+        if next_cursor is None and items:
+            for it in reversed(items):
+                eid = it.get('entryId', '')
+                if eid.startswith('cursor-bottom'):
+                    c = it.get('content') or {}
+                    if c.get('value') is not None:
+                        next_cursor = c['value']
+                        break
+            for it in items:
+                eid = it.get('entryId', '')
+                if eid.startswith('cursor-top'):
+                    c = it.get('content') or {}
+                    if c.get('value') is not None:
+                        previous_cursor = c['value']
+                        break
+
         if next_cursor is None:
             if product == 'Media':
-                entries = find_dict(instructions, 'entries', find_one=True)[0]
-                next_cursor = entries[-1]['content']['value']
-                previous_cursor = entries[-2]['content']['value']
+                entries_wrap = find_dict(blocks, 'entries', find_one=True)
+                if entries_wrap:
+                    entries = entries_wrap[0]
+                    if len(entries) >= 2:
+                        next_cursor = entries[-1]['content']['value']
+                        previous_cursor = entries[-2]['content']['value']
             else:
-                next_cursor = instructions[-1]['entry']['content']['value']
-                previous_cursor = instructions[-2]['entry']['content']['value']
+                try:
+                    next_cursor = blocks[-1]['entry']['content']['value']
+                    previous_cursor = blocks[-2]['entry']['content']['value']
+                except (KeyError, IndexError, TypeError):
+                    pass
 
         return Result(
             results,
