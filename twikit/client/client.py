@@ -2604,26 +2604,39 @@ class Client:
         if timeline_id is None:
             return []
         
-        response, _ = await self.gql.generic_timeline_by_id(timeline_id, count)
-        entry_id_prefix = "trend"
+        response, _ = await self.gql.generic_timeline_by_id(
+            timeline_id, count, additional_request_params
+        )
+        results = self._trends_from_generic_timeline_response(response)
+        if not results:
+            if not retry:
+                return []
+            return await self.get_trends(
+                category, count, retry, additional_request_params
+            )
+        return results
+
+    def _trends_from_generic_timeline_response(self, response) -> list[Trend]:
+        ':meta private:'
+        raw = find_dict(response, 'entries', find_one=True)
+        if not raw or not raw[0]:
+            return []
         entries = [
-            i for i in find_dict(response, 'entries', find_one=True)[0]
-            if i['entryId'].startswith(entry_id_prefix)
+            i for i in raw[0] if i.get('entryId', '').startswith('trend')
         ]
-        if not entries:
-          if not retry:
-              return []
-          # Recall the method again, as the trend information
-          # may not be returned due to a Twitter error.
-          return await self.get_trends(category, count, retry, additional_request_params)
-        
-        results = []
+        results: list[Trend] = []
         for entry in entries:
-            item_content = entry['content'].get('itemContent', {})
-            trend_info = item_content.get('trend')
-            if not trend_info:
+            item_content = entry.get('content', {}).get('itemContent') or {}
+            if item_content.get('trend'):
+                trend_data = item_content['trend']
+            elif (
+                item_content.get('__typename') == 'TimelineTrend'
+                and 'trend_metadata' in item_content
+            ):
+                trend_data = item_content
+            else:
                 continue
-            results.append(Trend(self, trend_info))
+            results.append(Trend(self, trend_data))
         return results
 
     async def get_available_locations(self) -> list[Location]:

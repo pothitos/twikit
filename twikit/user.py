@@ -14,6 +14,68 @@ if TYPE_CHECKING:
     from .utils import Result
 
 
+def normalize_graphql_user_data(data: dict) -> dict:
+    """
+    Merge GraphQL ``User`` objects (e.g. from SearchTimeline) into the legacy
+    shape expected by :class:`User`.
+    """
+    legacy = data.get('legacy')
+    if not isinstance(legacy, dict):
+        legacy = {}
+    else:
+        legacy = dict(legacy)
+    core_block = data.get('core')
+    if not (
+        isinstance(core_block, dict)
+        and 'created_at' in core_block
+        and not legacy.get('created_at')
+    ):
+        return {**data, 'legacy': legacy}
+
+    legacy['created_at'] = core_block['created_at']
+    legacy.setdefault('name', core_block.get('name') or '')
+    legacy.setdefault('screen_name', core_block.get('screen_name') or '')
+    avatar = data.get('avatar') or {}
+    legacy.setdefault('profile_image_url_https', avatar.get('image_url') or '')
+    loc = data.get('location')
+    if isinstance(loc, dict):
+        legacy.setdefault('location', loc.get('location') or '')
+    else:
+        legacy.setdefault('location', legacy.get('location') or '')
+    bio = data.get('profile_bio') or {}
+    legacy.setdefault(
+        'description',
+        bio.get('description') or legacy.get('description') or '',
+    )
+    dm = data.get('dm_permissions') or {}
+    legacy.setdefault('can_dm', dm.get('can_dm', False))
+    mp = data.get('media_permissions') or {}
+    legacy.setdefault('can_media_tag', mp.get('can_media_tag', False))
+    priv = data.get('privacy') or {}
+    legacy.setdefault('protected', priv.get('protected', False))
+    ver = data.get('verification') or {}
+    legacy.setdefault('verified', ver.get('verified', False))
+    entities = dict(legacy.get('entities') or {})
+    desc_block = dict(entities.get('description') or {})
+    desc_block.setdefault('urls', [])
+    entities['description'] = desc_block
+    url_block = dict(entities.get('url') or {})
+    url_block.setdefault('urls', [])
+    entities['url'] = url_block
+    legacy['entities'] = entities
+    legacy.setdefault(
+        'pinned_tweet_ids_str',
+        legacy.get('pinned_tweet_ids_str') or [],
+    )
+    legacy.setdefault(
+        'withheld_in_countries',
+        legacy.get('withheld_in_countries') or [],
+    )
+    merged = {**data, 'legacy': legacy}
+    merged.setdefault('is_blue_verified', data.get('is_blue_verified', False))
+    return merged
+
+
 class User:
     """
     Attributes
@@ -88,6 +150,7 @@ class User:
 
     def __init__(self, client: Client, data: dict) -> None:
         self._client = client
+        data = normalize_graphql_user_data(data)
         legacy = data['legacy']
 
         self.id: str = data['rest_id']

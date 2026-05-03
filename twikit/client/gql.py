@@ -33,7 +33,7 @@ class Endpoint:
     def url(path):
         return f'https://{DOMAIN}/i/api/graphql/{path}'
 
-    SEARCH_TIMELINE = url('flaR-PUMshxFWZWPNpq4zA/SearchTimeline')
+    SEARCH_TIMELINE = url('BqWLX1Tjvgh6eSZWEMH_kw/SearchTimeline')
     SIMILAR_POSTS = url('EToazR74i0rJyZYalfVEAQ/SimilarPosts')
     CREATE_NOTE_TWEET = url('iCUB42lIfXf9qPKctjE5rQ/CreateNoteTweet')
     CREATE_TWEET = url('SiM_cAu83R0wnrpmKQQSEw/CreateTweet')
@@ -71,7 +71,7 @@ class Endpoint:
     CREATE_BOOKMARK_FOLDER = url('6Xxqpq8TM_CREYiuof_h5w/createBookmarkFolder')
     FOLLOWERS = url('gC_lyAxZOptAMLCJX5UhWw/Followers')
     EXPLORE_PAGE = url('Lr7rbLxwMLDrWFJrlCdRVw/ExplorePage')
-    GENERIC_TIMELINE_BY_ID = url('J5pGd3g_8gGG28OGzHci8g/GenericTimelineById')
+    GENERIC_TIMELINE_BY_ID = url('1J_qfuZ9Npq3s8BbDQK9tQ/GenericTimelineById')
     BLUE_VERIFIED_FOLLOWERS = url('VmIlPJNEDVQ29HfzIhV4mw/BlueVerifiedFollowers')
     FOLLOWERS_YOU_KNOW = url('f2tbuGNjfOE8mNUO5itMew/FollowersYouKnow')
     FOLLOWING = url('2vUj-_Ek-UmBVDNtd8OnQA/Following')
@@ -156,7 +156,8 @@ class GQLClient:
             'rawQuery': query,
             'count': count,
             'querySource': 'typed_query',
-            'product': product
+            'product': product,
+            'withGrokTranslatedBio': True,
         }
         if cursor is not None:
             variables['cursor'] = cursor
@@ -309,12 +310,23 @@ class GQLClient:
         variables = {'cursor': ''}        
         return await self.gql_get(Endpoint.EXPLORE_PAGE, variables, EXPLORE_PAGE_FEATURES)
     
-    async def generic_timeline_by_id(self, timeline_id, count):
+    async def generic_timeline_by_id(
+        self,
+        timeline_id,
+        count,
+        extra_params: dict | None = None,
+    ):
         variables = {
             'timelineId': timeline_id,
-            'count': count
+            'count': count,
+            'withQuickPromoteEligibilityTweetFields': True,
         }
-        return await self.gql_get(Endpoint.GENERIC_TIMELINE_BY_ID, variables, GENERIC_TIMELINE_FEATURES)
+        return await self.gql_get(
+            Endpoint.GENERIC_TIMELINE_BY_ID,
+            variables,
+            GENERIC_TIMELINE_FEATURES,
+            extra_params=extra_params,
+        )
 
     async def bird_watch_one_note(self, note_id):
         variables = {'note_id': note_id}
