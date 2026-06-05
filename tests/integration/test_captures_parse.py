@@ -35,13 +35,17 @@ def test_parse_trends_from_capture():
 def test_parse_search_tweets_from_capture():
     from twikit.client.client import Client
     from twikit.tweet import tweet_from_data
-    from twikit.utils import find_dict
+    from twikit.utils import find_dict, find_entry_by_type
 
     client = Client('en-US')
     data = json.loads((CAPTURES_DIR / 'search_response.json').read_text())
-    instructions = find_dict(data, 'instructions', find_one=True)[0]
-    items_ = find_dict(instructions, 'entries', find_one=True)
-    items = items_[0] if items_ else []
+    try:
+        instructions = data['data']['search_by_raw_query'][
+            'search_timeline']['timeline']['instructions']
+    except (KeyError, TypeError):
+        instructions = find_dict(data, 'instructions', find_one=True)[0]
+    add = find_entry_by_type(instructions, 'TimelineAddEntries')
+    items = add.get('entries') if add is not None else []
 
     tweets = []
     for item in items:

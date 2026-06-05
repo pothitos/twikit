@@ -729,21 +729,27 @@ class Client:
         product = product.capitalize()
 
         response, _ = await self.gql.search_timeline(query, product, count, cursor)
-        instructions = find_dict(response, 'instructions', find_one=True)
-        if not instructions:
-            return Result([])
-        instructions = instructions[0]
+        try:
+            instructions = response['data']['search_by_raw_query'][
+                'search_timeline']['timeline']['instructions']
+        except (KeyError, TypeError):
+            instructions_ = find_dict(response, 'instructions', find_one=True)
+            if not instructions_:
+                return Result([])
+            instructions = instructions_[0]
 
         if product == 'Media' and cursor is not None:
-            items = find_dict(instructions, 'moduleItems', find_one=True)[0]
+            mod = find_dict(instructions, 'moduleItems', find_one=True)
+            items = mod[0] if mod else []
         else:
-            items_ = find_dict(instructions, 'entries', find_one=True)
-            if items_:
-                items = items_[0]
+            add = find_entry_by_type(instructions, 'TimelineAddEntries')
+            if add is not None:
+                items = add.get('entries') or []
             else:
-                items = []
+                items_ = find_dict(instructions, 'entries', find_one=True)
+                items = items_[0] if items_ else []
             if product == 'Media':
-                if 'items' in items[0]['content']:
+                if items and 'items' in items[0].get('content', {}):
                     items = items[0]['content']['items']
                 else:
                     items = []
@@ -757,25 +763,52 @@ class Client:
                 next_cursor = item['content']['value']
             if item['entryId'].startswith('cursor-top'):
                 previous_cursor = item['content']['value']
-            if not item['entryId'].startswith(('tweet', 'search-grid')):
+
+            entry_id = item['entryId']
+            # Conversation clusters (VerticalConversation): tweets live under content.items, not as tweet-* entries.
+            if entry_id.startswith('search-conversation'):
+                content = item.get('content') or {}
+                if content.get('entryType') == 'TimelineTimelineModule':
+                    for sub in content.get('items') or ():
+                        if not isinstance(sub, dict):
+                            continue
+                        try:
+                            tw = tweet_from_data(self, sub)
+                        except KeyError:
+                            tw = None
+                        if tw is not None:
+                            results.append(tw)
+                continue
+
+            if not entry_id.startswith(('tweet', 'search-grid')):
                 continue
 
             try:
                 tweet = tweet_from_data(self, item)
             except KeyError:
                 tweet = None
-                
+
             if tweet is not None:
                 results.append(tweet)
 
         if next_cursor is None:
-            if product == 'Media':
-                entries = find_dict(instructions, 'entries', find_one=True)[0]
-                next_cursor = entries[-1]['content']['value']
-                previous_cursor = entries[-2]['content']['value']
+            add_entries = find_entry_by_type(instructions, 'TimelineAddEntries')
+            fallback_entries = (
+                (add_entries.get('entries') or []) if add_entries is not None
+                else (find_dict(instructions, 'entries', find_one=True) or [[]])[0]
+            )
+            if product == 'Media' and len(fallback_entries) >= 2:
+                next_cursor = fallback_entries[-1]['content']['value']
+                previous_cursor = fallback_entries[-2]['content']['value']
+            elif len(fallback_entries) >= 2:
+                next_cursor = fallback_entries[-1]['content']['value']
+                previous_cursor = fallback_entries[-2]['content']['value']
             else:
-                next_cursor = instructions[-1]['entry']['content']['value']
-                previous_cursor = instructions[-2]['entry']['content']['value']
+                try:
+                    next_cursor = instructions[-1]['entry']['content']['value']
+                    previous_cursor = instructions[-2]['entry']['content']['value']
+                except (KeyError, IndexError, TypeError):
+                    pass
 
         return Result(
             results,
@@ -828,7 +861,22 @@ class Client:
         ...
         """
         response, _ = await self.gql.search_timeline(query, 'People', count, cursor)
-        items = find_dict(response, 'entries', find_one=True)[0]
+        try:
+            instructions = response['data']['search_by_raw_query'][
+                'search_timeline']['timeline']['instructions']
+        except (KeyError, TypeError):
+            instructions_ = find_dict(response, 'instructions', find_one=True)
+            if not instructions_:
+                return Result([], partial(self.search_user, query, count, None), None)
+            instructions = instructions_[0]
+        add = find_entry_by_type(instructions, 'TimelineAddEntries')
+        if add is not None:
+            items = add.get('entries') or []
+        else:
+            items_ = find_dict(instructions, 'entries', find_one=True)
+            items = items_[0] if items_ else []
+        if not items:
+            return Result([], partial(self.search_user, query, count, None), None)
         next_cursor = items[-1]['content']['value']
 
         results = []
@@ -3743,12 +3791,27 @@ class Client:
         >>> more_lists = await lists.next()  # Retrieve more lists
         """
         response, _ = await self.gql.search_timeline(query, 'Lists', count, cursor)
-        entries = find_dict(response, 'entries', find_one=True)[0]
+        try:
+            instructions = response['data']['search_by_raw_query'][
+                'search_timeline']['timeline']['instructions']
+        except (KeyError, TypeError):
+            instructions_ = find_dict(response, 'instructions', find_one=True)
+            if not instructions_:
+                return Result([], partial(self.search_list, query, count, None), None)
+            instructions = instructions_[0]
+        add = find_entry_by_type(instructions, 'TimelineAddEntries')
+        entries = (
+            add.get('entries') if add is not None
+            else (find_dict(instructions, 'entries', find_one=True) or [[]])[0]
+        )
+        if not entries:
+            return Result([], partial(self.search_list, query, count, None), None)
 
         if cursor is None:
             items = entries[0]['content']['items']
         else:
-            items = find_dict(response, 'moduleItems', find_one=True)[0]
+            mod = find_dict(instructions, 'moduleItems', find_one=True)
+            items = mod[0] if mod else []
 
         lists = []
         for item in items:
